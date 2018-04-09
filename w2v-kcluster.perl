@@ -2,13 +2,16 @@
 
 use lib qw(. ./lib ./blib/lib ./blib/arch);
 use word2vec::Model;
+use word2vec::Kcluster;
 
 use Getopt::Long qw(:config no_ignore_case);
+use File::Basename qw(basename);
 use open qw(:std :utf8);
 use strict;
 
 ##==============================================================================
 ## Command-line
+my $prog = basename($0);
 my ($help);
 my %copt = (
 	    nc => 0, ##-- default: 10
@@ -18,8 +21,10 @@ my %copt = (
 	    ctr => 'm', ##-- qw(a:mean m:median)
 	   );
 
+my $kmodelfile = '';
 my $outfile = '-';
 my $verbose = 1;
+my $outmode = 'text';
 our $compile = 0;
 our $tmpbase = undef;
 END {
@@ -37,6 +42,9 @@ GetOptions(
 	   'maxn=i' => \$model{maxn},
 	   'c|compile!' => \$compile,
 	   'o|output=s' => \$outfile,
+	   'k|known=s' => \$kmodelfile,
+	   'T|text!' => sub { $outmode = 'text' },
+	   'J|json!' => sub { $outmode = 'json' },
 
 	   'cn|n|nc|nclusters=i' => $copt{nc},
 	   'cs|ncw|nwc|csize=i' => \$copt{ncw},
@@ -51,7 +59,7 @@ GetOptions(
 if ($help || @ARGV < 1) {
   print STDERR <<EOF;
 
-Usage: $0 [OPTIONS] MODEL_OR_VECFILE
+Usage: $prog \[OPTIONS] MODEL_OR_VECFILE
 
 Options:
   -h,  -help                # this help message
@@ -59,6 +67,7 @@ Options:
   -c,  -[no]compile         # do/don't compile text-model FTMODEL (default=don't)
        -minn MINN           # minimum n-gram length for OOV words (default=$model{minn})
        -maxn MAXN           # minimum n-gram length for OOV words (default=$model{maxn})
+  -k,  -kmodel KMODEL       # mark "known/unknown" field according to MODEL (default=none)
   -cs, -csize CSIZE         # target average cluster size; if specified sets NCLUS=(NWORDS/CSIZE)
   -cn, -nclusters NCLUS     # number of output clusters (overrides CSIZE; fallback default=10)
   -cd, -distance DIST       # distance flag (e:Euclid b:Manhattan c:Pearson a:abs(Pearson) u:Cosine x:abs(Cosine) s:Spearman k:Kendall; default=$copt{dist})
@@ -94,16 +103,37 @@ if ($compile) {
   $tmpbase = "/tmp/ftkc$$";
   word2vec::Model->info("compiling temporary model '$tmpbase.*'");
   $model = word2vec::Model->compile($modelfile, %model,type=>'double',start=>0,nodims=>1,base=>$tmpbase)
-    or die("$0: failed to compile text-model '$modelfile' to '$tmpbase.*': $!");
+    or die("$prog: failed to compile text-model '$modelfile' to '$tmpbase.*': $!");
 } else {
   $model = word2vec::Model->new(%model,base=>$modelfile)
-    or die("$0: failed to open binary model $modelfile.*: $!");
+    or die("$prog: failed to open binary model $modelfile.*: $!");
 }
 
 ##-- do clustering
-my $clu = $model->kcluster(%copt);
+my $kc = $model->kcluster(%copt);
 
-$model->info("kcluster(): $_") foreach ($model->cluster_summary($clu));
+##-- optionally set "unknowns"
+if ($kmodelfile) {
+  my $kmodel = word2vec::Model->new(base=>$kmodelfile)
+    or die("$prog: failed to open known model $kmodelfile.*: $!");
+  $kc->setknown($kmodel)
+    or die("$prog: failed to mark unknown word(s) using $kmodelfile.*");
+}
+
+
+##-- show summary
+$kc->info("Summary:");
+$kc->info(" + $_") foreach ($kc->summary());
+
+##-- dump
+if ($outmode eq 'json') {
+  $kc->saveJsonFile($outfile)
+    or die("$prog: failed to save clustering result in JSON-mode to '$outfile': $!");
+} else {
+  $kc->saveTextFile($outfile)
+    or die("$prog: failed to save clustering result in text-mode to '$outfile': $!");
+}
 
 ##-- cleanup
+undef $kc;
 $model->unlink() if ($compile);

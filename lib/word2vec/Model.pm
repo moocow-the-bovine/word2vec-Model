@@ -4,8 +4,6 @@ package word2vec::Model;
 use PDL;
 use PDL::IO::FastRaw;
 use PDL::VectorValued;
-use PDL::CCS; ##-- for nnz()
-use PDL::Cluster qw();
 use DiaColloDB::Logger;
 use DiaColloDB::EnumFile::MMap;
 use open qw(:std :utf8);
@@ -18,8 +16,11 @@ BEGIN {
   no warnings 'once';
   $PDL::BIGPDL = 1;
 
-  push(@{$DiaColloDB::Logger::defaultLogOpts{logwhich}}, __PACKAGE__)
-    if (!grep {$_ eq __PACKAGE__} @{$DiaColloDB::Logger::defaultLogOpts{logwhich}});
+  my $logpkg = __PACKAGE__;
+  $logpkg =~ s/::.*$//;
+
+  push(@{$DiaColloDB::Logger::defaultLogOpts{logwhich}}, $logpkg)
+    if (!grep {$_ eq $logpkg} @{$DiaColloDB::Logger::defaultLogOpts{logwhich}});
 }
 
 ##==============================================================================
@@ -416,132 +417,11 @@ sub knn {
 ## API: k-means / k-medoids clustering
 
 ##--------------------------------------------------------------
-##  %cluster = $model->kcluster(%opts)
-## \%cluster = $model->kcluster(%opts)
-##  + options %opts:
-##    (
-##     dist  => $distanceFlag, ##-- qw(e:Euclid b:Manhatten c:Pearson a:abs(Pearson) u:Cosine x:abs(Cosine) s:Spearman k:Kendall); default='u'
-##     ctr   => $ctrFlag,      ##-- qw(a:mean m:median); default='m'
-##     npass => $npass,        ##-- number of passes (default=5)
-##     ncw   => $ncw,          ##-- target average cluster size; if specified sets $nc=($nw/$csize)
-##     nc    => $nc,           ##-- number of target clusters (overrides $ncw; fallback default=10)
-##    )
-##  + returned cluster data %cluster:
-##    (
-##     %opts,                  ##-- options are passed out
-##     unknown    => $uwids,   ##-- pdl($nu)     : ($ui) => $wi s.t. $wi is unknown (null-vector)
-##     clusterids => $cids,    ##-- pdl($nw)     : ($wi) => $ci s.t. $ci==cluster($wi)
-##     csizes     => $csizes,  ##-- cluster sizes
-##     error      => $error,   ##-- total distance of all words to their respective assigned clusters
-##     nfound     => $nfound,  ##-- number of passes on which best solution was found
-##     rcmat      => $rcmat,   ##-- centroid matrix       : pdl($nr,$nc) : ($ri,$ci) => $rval_at_cluster_c
-##     wcdist     => $wcdist,  ##-- word-cluster distances: pdl($nw)     : ($wi)     => distance($wi,$cids->at($wi))
-##    )
+## $kc = $model->kcluster(%opts)
+## $kc = $model->kcluster(%opts)
+##  + options %opts as for word2vec::Kcluster->new()
 sub kcluster {
   my ($model,%opts) = @_;
-
-  ##-- model properties
-  my $rwmat    = $model->{rwmat};
-  my ($nr,$nw) = $rwmat->dims;
-
-  ##-- options
-  my $dist = ($opts{dist} ||= 'u');
-  my $ctr  = ($opts{ctr}  ||= 'm');
-  my $npass = ($opts{npass} ||= 5);
-  my $nc = ($opts{nc}
-	    || ($opts{ncw} ? int($nw/$opts{ncw}) : undef)
-	    || 10);
-  $opts{nc} ||= $nc;
-
-  ##-- track unknown words
-  $model->info("kcluster(): checking for unknown words");
-  my $kmask = ones(byte,$nw);
-  $kmask->where($rwmat->nnz==0) .= 0;
-  my ($knowni,$unki) = $kmask->which_both;
-  if (!all($kmask)) {
-    $model->info("kcluster(): ignoring ", $unki->nelem, " unknown word(s)");
-    $rwmat = $rwmat->dice_axis(1,$knowni);
-  } else {
-    $model->info("kcluster(): no unknown words detected (and there was much rejoicing)");
-  }
-
-  ##-- cluster
-  $model->info("kcluster() configuration: NCLUS=$nc, NPASS=$npass, DIST=$dist, CTR=$ctr");
-  my $mask   = ones(long,   $rwmat->dims);
-  my $weight = ones(double, $nr);
-  my $clusterids = zeroes(long, $nw);           ##-- all words
-  my $cids       = $clusterids->index($knowni); ##-- known words only
-  $clusterids->index($unki) .= -1;              ##-- $ci==-1: "unknown" cluster
-  my ($error,$nfound);
-  PDL::Cluster::kcluster($nc, $rwmat,$mask,$weight, $npass,
-			 $cids,
-			 ($error=null),
-			 ($nfound=null),
-			 $dist, $ctr,
-			);
-
-  ##-- get cluster centroids and word-cluster distances
-  my $cdata = zeroes(double,$nr,$nc);
-  my $cmask = zeroes(long,$nr,$nc);
-  my $wcdist = zeroes(double,$nw);
-  my $kcdist = $wcdist->index($knowni);
-  PDL::Cluster::getclustercentroids($rwmat,$mask, $cids, $cdata,$cmask, $ctr);
-  for (my $ci=0; $ci < $nc; ++$ci) {
-    my $kis    = which($cids==$ci);
-    my $crow   = $cdata->slice(",$ci");
-    my $cwmat  = $crow->glue(1,$rwmat->dice_axis(1,$kis));
-    my $cwmask = ones(long,$cwmat->dims);
-    PDL::Cluster::rowdistances($cwmat,$cwmask,$weight, zeroes(long,$kis->nelem), ($kis->xvals+1), $kcdist->index($kis), $dist);
-  }
-
-  ##-- get cluster sizes
-  my $csizes = zeroes(long,$nc);
-  PDL::Cluster::clustersizes($cids, $csizes);
-
-  ##-- return
-  my %rc = (
-	    %opts,
-	    unknown => $unki,
-	    clusterids => $clusterids,
-	    error => $error,
-	    nfound => $nfound,
-	    rcmat => $cdata,
-	    wcdist => $wcdist,
-	    csizes => $csizes,
-	   );
-  return wantarray ? %rc : \%rc;
-}
-
-##--------------------------------------------------------------
-## "$min / $max / $med / $avg / $sd" = pdl_summary($pdl)
-## "$min / $max / $med / $avg / $sd" = pdl_summary($pdl,$fmt)
-sub pdl_summary {
-  my ($p,$fmt) = @_;
-  $fmt ||= '%8.3g';
-  my ($avg,$prms,$med,$min,$max,$adev,$rms) = $p->stats;
-  return join(" / ", map {sprintf($fmt, $_)} ($min,$max,$med,$avg,$rms));
-}
-
-##--------------------------------------------------------------
-## @summary = $model->cluster_summary(\%cluster)
-##  + summarizes clustering result
-sub cluster_summary {
-  my ($model,$clu) = @_;
-
-  ##-- common vars
-  my $nw    = $model->{nw};
-  my $nunkw = $clu->{unknown}->nelem;
-
-  return (
-	  "number of target words: $nw",
-	  "number of unknown targets (ignored): $nunkw (".sprintf("%.1f %%", 100*$nunkw/$nw).")",
-	  "number of passes: $clu->{npass}",
-	  "number of times solution found: $clu->{nfound}",
-	  "number of clusters: $clu->{nc}",
-	  "cluster distance function: $clu->{dist}",
-	  "cluster centroid method: $clu->{ctr}",
-	  "cluster sizes (min/max/med/avg/sd): ".pdl_summary($clu->{csizes}),
-	  "cluster dists (min/max/med/avg/sd): ".pdl_summary($clu->{wcdist}),
-	  "total dist = ".sprintf("%.3g", $clu->{error}->sclr)."\n",
-	 );
+  require word2vec::Kcluster;
+  return word2vec::Kcluster->new(%opts,model=>$model);
 }
