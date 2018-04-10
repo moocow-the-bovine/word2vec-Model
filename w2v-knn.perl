@@ -15,7 +15,7 @@ use strict;
 my $prog = basename($0);
 my ($help);
 my $k = 10;
-my %model = (minn=>0,maxn=>0,nganchor=>0,ngweight=>0);
+my %model = (minn=>0,maxn=>0,nganchor=>0,ngweight=>1);
 my %log  = (level=>'TRACE', rootLevel=>'FATAL');
 
 GetOptions(

@@ -33,7 +33,7 @@ END {
   }
 }
 
-my %model    = (minn=>0,maxn=>0, logOOV=>'off');
+my %model    = (minn=>0,maxn=>0,nganchor=>0,ngweight=>1, logOOV=>'off');
 our %log  = (level=>'DEBUG', rootLevel=>'FATAL');
 GetOptions(
 	   'h|help' => \$help,
@@ -67,6 +67,8 @@ Options:
   -c,  -[no]compile         # do/don't compile text-model FTMODEL (default=don't)
        -minn MINN           # minimum n-gram length for OOV words (default=$model{minn})
        -maxn MAXN           # minimum n-gram length for OOV words (default=$model{maxn})
+       -[no]anchor          # do/don't use only anchored (BOW,EOW) n-gram regexes (default=$model{nganchor})
+       -[no]weight          # do/don't weight regex matches by frequency if available (default=$model{ngweight})
   -k,  -kmodel KMODEL       # mark "known/unknown" field according to MODEL (default=none)
   -cs, -csize CSIZE         # target average cluster size; if specified sets NCLUS=(NWORDS/CSIZE)
   -cn, -nclusters NCLUS     # number of output clusters (overrides CSIZE; fallback default=10)
