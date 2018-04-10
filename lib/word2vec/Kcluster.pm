@@ -348,14 +348,14 @@ sub saveJsonCluster {
   my $label = $opts{label} || "CLUSTER_$ci";
   my $ctag  = $opts{ctag}  || "c$ci";
 
-  my $cinfo = $kc->cinfo($ci);
-  my @cwords = map { {dist=>$kc->{wcdist}->at($_), known=>$kc->{kmask}->at($_), word=>$kc->{model}{wenum}->i2s($_)} } $cinfo->{wis}->list;
+  my $cinfo  = $kc->cinfo($ci);
+  my @citems = map { {dist=>$kc->{wcdist}->at($_), known=>$kc->{kmask}->at($_), label=>$kc->{model}{wenum}->i2s($_)} } $cinfo->{wis}->list;
   my $jc = {
 	    label  =>$label,
 	    tag    =>$ctag,
 	    size   =>$cinfo->{wis}->nelem,
 	    dstats =>pdl_stats($cinfo->{wdist},"%.4f"),
-	    words  =>\@cwords,
+	    items  =>\@citems,
 	   };
   return $jc;
 }
