@@ -11,7 +11,7 @@ use open qw(:std :utf8);
 use strict;
 
 our @ISA = qw(DiaColloDB::Persistent);
-our $VERSION = $word2vec::Model::VERSION;
+our $VERSION = '0.0.2';
 
 BEGIN {
   push(@{$DiaColloDB::Logger::defaultLogOpts{logwhich}}, __PACKAGE__)
@@ -19,7 +19,7 @@ BEGIN {
 }
 
 ##==============================================================================
-## constructors
+## constructors etc
 
 ## $model = CLASS_OR_OBJECT->new(%args)
 ##  + %args, %$model:
@@ -155,6 +155,7 @@ sub pdl_sclr {
 ##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ## \%stats = pdl_stats($pdl)
 ## \%stats = pdl_stats($pdl,$fmt)
+## \%stats = pdl_stats($pdl,$fmt)
 sub pdl_stats {
   my $p = shift;
   my %stats;
@@ -165,6 +166,14 @@ sub pdl_stats {
   }
   delete @stats{qw(prms adev)}; ##-- ignore these
   return \%stats;
+}
+
+## \%stats = pdl_stats($pdl, [$fmt])
+##  + like pdl_stats() but numifies
+sub json_stats {
+  my $stats = pdl_stats(@_);
+  $_ += 0 foreach (values %$stats);
+  return $stats;
 }
 
 ##--------------------------------------------------------------
@@ -274,6 +283,10 @@ sub saveTextFh {
   my ($kc,$fh) = @_;
   binmode($fh,":utf8");
 
+  ##-- sanity check(s)
+  $kc->logconfess("saveTextFh(): no clustering result to save!")
+    if (grep {!defined($_)} @$kc{qw(model clusterids csizes error wcdist)});
+
   ##-- save summary information
   print $fh (map {"# ".ref($kc).": $_\n"} $kc->summary());
 
@@ -292,7 +305,7 @@ sub saveTextFh {
 sub saveTextCluster {
   my ($kc,$fh,$ci,%opts) = @_;
   my $label = $opts{label} || "CLUSTER_$ci";
-  my $ctag  = $opts{ctaag} || "c$ci";
+  my $ctag  = $opts{ctag}  || "c$ci";
 
   my $cinfo = $kc->cinfo($ci);
   my $stats = pdl_stats($cinfo->{wdist},"%.3g");
@@ -319,24 +332,29 @@ sub saveTextCluster {
 sub TO_JSON {
   my ($kc,%opts) = shift;
 
+  ##-- sanity check(s)
+  $kc->logconfess("TO_JSON(): no clustering result to save!")
+    if (grep {!defined($_)} @$kc{qw(model clusterids csizes error wcdist)});
+
   my $cls = ref($kc);
   $cls =~ s/^word2vec:://;
   my $hdr = {
 	     'class'=>$cls,
 	     'version'=>$VERSION,
-	     'libversion'=>$PDL::Cluster::VERSION,
-	     (map {($_=>pdl_sclr($kc->{$_}))} qw(dist ctr npass nc)),
+	     'libversion'=>"PDL::Cluster v$PDL::Cluster::VERSION",
+	     (map {($_=>$kc->{$_})} qw(dist ctr)),
+	     (map {($_=>pdl_sclr($kc->{$_})+0)} qw(npass nc)),
 	     'stats' => {
-			 'error' => sprintf("%.4g",pdl_sclr($kc->{error})),
+			 'error' => sprintf("%.4g",pdl_sclr($kc->{error}))+0,
 			 'nfound' => pdl_sclr($kc->{nfound}),
-			 'csizes' => pdl_stats($kc->{csizes},"%.4g"),
-			 'cdists' => pdl_stats($kc->{wcdist},"%.4g"),
+			 'csizes' => json_stats($kc->{csizes},"%.4g"),
+			 'cdists' => json_stats($kc->{wcdist},"%.4g"),
 			},
 	    };
   my @clus = qw();
-  push(@clus, $kc->saveJsonCluster(-1,label=>"UNKNOWN")) if (any($kc->{clusterids}==-1));
+  push(@clus, $kc->saveJsonCluster(-1,label=>"UNKNOWN",ctag=>'u')) if (any($kc->{clusterids}==-1));
   for (my $ci = 0; $ci < $kc->{nc}; ++$ci) {
-    push(@clus, $kc->saveJsonCluster($ci,label=>"CLUSTER_$ci"));
+    push(@clus, $kc->saveJsonCluster($ci));
   }
 
   return { head=>$hdr, clusters=>\@clus };
@@ -354,7 +372,7 @@ sub saveJsonCluster {
 	    label  =>$label,
 	    tag    =>$ctag,
 	    size   =>$cinfo->{wis}->nelem,
-	    dstats =>pdl_stats($cinfo->{wdist},"%.4f"),
+	    dstats =>json_stats($cinfo->{wdist},"%.4f"),
 	    items  =>\@citems,
 	   };
   return $jc;

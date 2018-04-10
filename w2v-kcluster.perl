@@ -102,7 +102,7 @@ DiaColloDB::Logger->ensureLog(%log);
 my ($model);
 my $modelfile = shift(@ARGV);
 if ($compile) {
-  $tmpbase = "/tmp/ftkc$$";
+  $tmpbase = "/tmp/wvkc$$";
   word2vec::Model->info("compiling temporary model '$tmpbase.*'");
   $model = word2vec::Model->compile($modelfile, %model,type=>'double',start=>0,nodims=>1,base=>$tmpbase)
     or die("$prog: failed to compile text-model '$modelfile' to '$tmpbase.*': $!");

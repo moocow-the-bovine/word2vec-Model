@@ -10,7 +10,7 @@ use open qw(:std :utf8);
 use strict;
 
 our @ISA = qw(DiaColloDB::Persistent);
-our $VERSION = '0.0.1';
+our $VERSION = '0.0.2';
 
 BEGIN {
   no warnings 'once';
@@ -196,7 +196,7 @@ sub compile {
      "$nr $nw\n",  ##-- dims
     );
   CORE::close($hdrfh)
-    or $model->logconfess("$0: failed to close header file '$pdlbase.hdr': $!");
+    or $model->logconfess("compile(): failed to close header file '$pdlbase.hdr': $!");
 
   ##-- create enum
   $model->info("compile(): creating enum $base.enum.*");
@@ -232,6 +232,99 @@ sub compile {
   ##-- now open the model
   #$model->info("compile(): opening newly compiled model");
   return $model->open();
+}
+
+##--------------------------------------------------------------
+## I/O: project
+
+## $pmodel = $model->project(\@words, %opts)
+##  + returns $model restricted to @words
+##  + %opts are passed to ref($model)->new() for $pmodel
+##  + default %opts:
+##     start => 0
+sub project {
+  my ($imodel,$words,%opts) = @_;
+
+  ##-- initialization
+  my $base  = $opts{base};
+  $imodel->logconfess("project(): no output {base} specified") if (!$base);
+
+  my $model = ref($imodel)->new(%opts, base=>undef);
+  $model->clear();
+
+  ##-- basic variables
+  my $start  = ($model->{start} //= 0);
+  my $type   = $model->{type} || 'float';
+
+  ##-- get dimensions
+  my $nw = $model->{nw} = scalar(@$words);
+  my $nr = $model->{nr} = $imodel->{nr};
+
+  ##-- get basic pdl datatype info
+  my $pdlbase = "$base.pdl";
+  my $ptype   = $PDL::Types::typenames{$type}
+    or $model->logconfess("project(): unknown PDL type '$type'; use one of (",
+			  join(' ', map {$_->{ioname}} sort {$a->{numval}<=>$b->{numval}} values %PDL::Types::typehash), ")"
+			 );
+  my $packas = $PDL::Types::pack[$ptype]
+    or $model->logconfess("project(): no pack-type for PDL type '$type'!");
+
+  ##-- open raw pdl outfile
+  $model->info("project(): preparing pdl-file $pdlbase");
+  CORE::open(my $pdlfh, ">$pdlbase")
+    or $model->logconfess("project(): open failed for raw PDL file $pdlbase: $!");
+  binmode($pdlfh,':raw');
+
+  ##-- pdl file: write zeroes until start offset
+  if (defined($nr) && $start > 0) {
+    $model->info("project(): prepending initial zero-vector(s) (start=$start, nr=$nr)");
+    my $buf = pack($packas,0) x $nr;
+    print $pdlfh ($buf x $start) if ($start > 0);
+  }
+
+  ##-- generate vectors
+  my $i2s = ($start==0 ? $words : []);      ##-- $w=$i2s->[$wi]
+  $i2s->[$start-1] = undef if ($start > 0); ##-- honor start offset
+  my ($w,$wv);
+  foreach $w (@$words) {
+    push(@$i2s,$w) if ($start != 0);
+    $wv = $imodel->any2v($w);
+    print $pdlfh pack($packas,$wv->list); ##-- possible type conversion via perl pack
+  }
+  ##-- finalize pdl-file
+  CORE::close($pdlfh)
+      or $model->logconfess("project(): close failed for raw PDL-file '$pdlbase': $!");
+
+  ##-- finalize dimensions
+  $model->{nw} = $nw = scalar(@$i2s);
+
+  ##-- write pdl header
+  $model->info("project(): writing pdl-header $pdlbase.hdr");
+  CORE::open(my $hdrfh,">$pdlbase.hdr")
+  or $model->logconfess("project() open failed for '$pdlbase.hdr': $!");
+  binmode($hdrfh,":raw");
+  print $hdrfh
+    ("$ptype\n",   ##-- type-id
+     "2\n",        ##-- ndims
+     "$nr $nw\n",  ##-- dims
+    );
+  CORE::close($hdrfh)
+    or $model->logconfess("project(): failed to close header file '$pdlbase.hdr': $!");
+
+  ##-- create enum
+  $model->info("project(): creating enum $base.enum.*");
+  my $ebase = "$base.enum";
+  my $wenum = $model->{wenum} = DiaColloDB::EnumFile::MMap->new(flags=>'rw',base=>$ebase);
+  $wenum->fromArray($i2s)
+    or $model->logconfess("project(): failed to initialize enum from array");
+  $wenum->save()
+    or $model->logconfess("project(): failed to save enum to '$ebase.*': $!");
+
+  ##-- project frequencies (NOT IMPLEMENTED)
+
+  ##-- now open the model
+  #$model->info("project(): opening newly compiled model");
+  return $model->open($base);
 }
 
 ##--------------------------------------------------------------

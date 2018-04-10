@@ -36,10 +36,10 @@ Usage: $prog \[OPTIONS] VECFILE
 
 Options:
   -h,  -help                # this help message
-  -t,  -type                # PDL datatype (default=$model{type})
   -d,  -[no]dims            # do/don't load dimensions from 1st line of VECFILE (default=do)
   -s,  -start OFFSET        # offset of first word index (default=1, requires -dims)
   -f,  -freqs FREQFILE      # frequency file (WORD FREQ; optional)
+  -t,  -type                # PDL datatype (default=$model{type})
   -o,  -output BASE         # output basename (default=VECFILE)
   -ll, -log-level LEVEL     # set log-level LEVEL (default=$log{level})
   -lo, -log-option OPT=VAL  # set generic logging option
