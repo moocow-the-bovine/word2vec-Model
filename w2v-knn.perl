@@ -15,14 +15,17 @@ use strict;
 my $prog = basename($0);
 my ($help);
 my $k = 10;
-my %model = (minn=>0,maxn=>0);
+my %model = (minn=>0,maxn=>0,nganchor=>0,ngweight=>0);
 my %log  = (level=>'TRACE', rootLevel=>'FATAL');
 
 GetOptions(
 	   'h|help' => \$help,
 	   'k|knn=i' => \$k,
+
 	   'minn=i' => \$model{minn},
 	   'maxn=i' => \$model{maxn},
+	   'a|anchor|nganchor!' => \$model{nganchor},
+	   'w|weight|ngweight!' => \$model{ngweight},
 
 	   ##-- logging
 	   'log-level|level|ll=s' => sub { $log{level} = uc($_[1]); },
@@ -38,6 +41,8 @@ Options:
   -k,  -knn K               # number of nearest neighbors to extract (default=$k)
        -minn MINN           # minimum n-gram length for OOV words (default=$model{minn})
        -maxn MAXN           # minimum n-gram length for OOV words (default=$model{maxn})
+       -[no]anchor          # do/don't use only anchored (BOW,EOW) n-gram regexes (default=$model{nganchor})
+       -[no]weight          # do/don't weight regex matches by frequency if available (default=$model{ngweight})
   -ll, -log-level LEVEL     # set log-level LEVEL (default=$log{level})
   -lo, -log-option OPT=VAL  # set generic logging option
 

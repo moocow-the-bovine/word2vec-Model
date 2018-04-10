@@ -13,7 +13,7 @@ use strict;
 my $prog = basename($0);
 my ($help);
 my $outbase = '';
-my %model = (type=>'float', nodims=>0, start=>1);
+my %model = (type=>'float', nodims=>0, start=>1, freqfile=>undef);
 my %log  = (level=>'TRACE', rootLevel=>'FATAL');
 
 
@@ -23,6 +23,7 @@ GetOptions(
 	   't|type' => \$model{type},
 	   'd|dims!' => sub { $model{nodims}=!$_[1] },
 	   's|start=i' => \$model{start},
+	   'f|freqs=s' => \$model{freqfile},
 
 	   ##-- logging
 	   'log-level|level|ll=s' => sub { $log{level} = uc($_[1]); },
@@ -38,6 +39,7 @@ Options:
   -t,  -type                # PDL datatype (default=$model{type})
   -d,  -[no]dims            # do/don't load dimensions from 1st line of VECFILE (default=do)
   -s,  -start OFFSET        # offset of first word index (default=1, requires -dims)
+  -f,  -freqs FREQFILE      # frequency file (WORD FREQ; optional)
   -o,  -output BASE         # output basename (default=VECFILE)
   -ll, -log-level LEVEL     # set log-level LEVEL (default=$log{level})
   -lo, -log-option OPT=VAL  # set generic logging option

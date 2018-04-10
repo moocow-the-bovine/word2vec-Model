@@ -298,7 +298,14 @@ sub saveTextCluster {
   my $stats = pdl_stats($cinfo->{wdist},"%.3g");
   print $fh
     ("# $label (".join('; ', ("size=".$cinfo->{wis}->nelem), map {"d_$_=$stats->{$_}"} qw(min max med avg sd)).")\n",
-     (map {join("\t", $kc->{kmask}->at($_), $ctag, $kc->{model}{wenum}->i2s($_), "\n")} $cinfo->{wis}->list),
+     (map {
+       join("\t",
+	    $kc->{kmask}->at($_),
+	    $ctag,
+	    sprintf("%.4f",$kc->{wcdist}->at($_)),
+	    $kc->{model}{wenum}->i2s($_)
+	   )."\n"
+	 } $cinfo->{wis}->list),
      "\n"
     );
 }

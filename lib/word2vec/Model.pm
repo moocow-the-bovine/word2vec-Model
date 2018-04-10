@@ -32,6 +32,10 @@ BEGIN {
 ##     base  => $base,    ##-- file basename
 ##     start => $wi0,     ##-- first word-ID (default=1)
 ##     type  => $type,    ##-- type for rwmat (default='float')
+##     minn  => $minn,    ##-- minimum n-gram length for OOV vector estimation (default=0:disable)
+##     maxn  => $maxn,    ##-- maximum n-gram length for OOV vector estimation (default=0:disable)
+##     nganchor => $bool, ##-- if true, only use anchored (BOW,EOW) n-grams (default=0)
+##     ngweight => $bool, ##-- if true, regex vectors are weighted by {wfreq} if available (default=1)
 ##     ##
 ##     ##-- logging
 ##     logOOV => $level,  ##-- log-level for OOV words (default='warn')
@@ -40,20 +44,26 @@ BEGIN {
 ##     wenum => $wenum,   ##-- word (lemma) enum
 ##     nr    => $nr,      ##-- number of "topics" / "latent dimensions" of model / model "rank"
 ##     nw    => $nw,      ##-- number of enum-ified words
-##     rwmat => $rwmat,   ##-- topic-word matrix ($nr,$nw): [$ri,$wi] => $rval_at_w
+##     rwmat => $rwmat,   ##-- "$base.pdl"     : topic-word matrix ($nr,$nw): [$ri,$wi] => $rval_at_w
+##     wfreq => $wfreq,   ##-- "$base.wfreq.pdl": word frequencies, optional: ($nw): [$wi] => $f_w
 ##    )
 sub new {
   my $that = shift;
   my $model = bless({
-		  base  => undef,
-		  start => 1,
-		  logOOV => 'warn',
-		  wenum => DiaColloDB::EnumFile::MMap->new(flags=>'r'),
-		  nr  => undef,
-		  nw  => undef,
-		  rwmat => undef,
-		  @_,
-		 }, ref($that)||$that);
+		     base  => undef,
+		     start => 1,
+		     minn => 0,
+		     maxn => 0,
+		     nganchor => 0,
+		     ngweight => 1,
+		     logOOV => 'warn',
+		     wenum => DiaColloDB::EnumFile::MMap->new(flags=>'r'),
+		     nr  => undef,
+		     nw  => undef,
+		     rwmat => undef,
+		     wfreq => undef,
+		     @_,
+		    }, ref($that)||$that);
   return $model->open() if (defined($model->{base}));
   return $model;
 }
@@ -63,7 +73,7 @@ sub new {
 sub clear {
   my $model = shift;
   $model->close();
-  delete @$model{qw(wenum rwmat nw nr)};
+  delete @$model{qw(wenum rwmat wfreq nw nr)};
   return $model;
 }
 
@@ -77,7 +87,7 @@ sub DESTROY {
 ## @files = $obj->diskFiles()
 sub diskFiles {
   my $model = shift;
-  return ($model->{base} ? (map {glob("$model->{base}.$_*")} qw(pdl enum)) : qw());
+  return ($model->{base} ? (map {glob("$model->{base}.$_*")} qw(pdl enum freq)) : qw());
 }
 
 
@@ -89,7 +99,8 @@ sub diskFiles {
 
 ## $model = $model->compile($fasttext_text_vectors_file_or_fh, %opts)
 ##  + %opts: clobber %$model, also:
-##     nodims => $bool,      ##-- don't try to load dimensions from 1st line
+##     nodims => $bool,       ##-- don't try to load dimensions from 1st line
+##     freqfile => $freqfile, ##-- compile {wfreq} from $freqfile (WORD FREQ), optional
 ##  + populates @$model{qw(wenum rwmat nr nw)}
 sub compile {
   my ($model,$file,%opts) = @_;
@@ -196,6 +207,28 @@ sub compile {
   $wenum->save()
     or $model->logconfess("compile(): failed to save enum to '$ebase.*': $!");
 
+  ##-- compile frequency file
+  if ( (my $freqfile = $opts{freqfile}) ) {
+    $model->info("compile(): compiling word frequencies from '$freqfile'");
+    open(my $finfh, "<$freqfile")
+      or $model->logconfess("compile(): open failed for word-frequency input file '$freqfile': $!");
+    my $wfreq = zeroes(PDL::Type->new($ptype),$nw);
+    my ($wi,$wf,$rest);
+    while (defined($_=<$finfh>)) {
+      chomp;
+      next if (/^\s*$/ || /^\S+$/); ##-- ignore dimensions
+      ($w,$wf,$rest) = split(' ',$_,3);
+      if (!defined($wi = $wenum->s2i($w))) {
+	$model->logwarn("compile(): unknown word '$w' in word-frequency file '$freqfile' - ignoring");
+	next;
+      }
+      $wfreq->set($wi => $wf);
+    }
+    CORE::close($finfh);
+    $wfreq->writefraw("$base.wfreq.pdl")
+      or $model->logconfess("compile(): failed to write '$base.wfreq.pdl': $!");
+  }
+
   ##-- now open the model
   #$model->info("compile(): opening newly compiled model");
   return $model->open();
@@ -226,10 +259,17 @@ sub open {
   $model->{wenum}->open("$base.enum",'r')
     or $model->logconfess("open(): failed to open enum-file(s) $base.enum.*: $!");
 
-  ##-- open PDL
+  ##-- open matrix PDL
   $model->{rwmat} = mapfraw("$base.pdl",{ReadOnly=>1});
   defined($model->{rwmat})
     or $model->logconfess("open(): failed to mmap PDL file '$base.pdl': $!");
+
+  ##-- (optional): open frequency pdl
+  if (-e "$base.wfreq.pdl") {
+    $model->{wfreq} = mapfraw("$base.wfreq.pdl",{ReadOnly=>1});
+    defined($model->{wfreq})
+      or $model->logconfess("open(): failed to mmap frequency PDL file '$base.wfreq.pdl': $!");
+  }
 
   ##-- get dimensions
   @$model{qw(nr nw)} = $model->{rwmat}->dims();
@@ -261,7 +301,6 @@ sub nullv {
 
 ##--------------------------------------------------------------
 ## $wv      = $model->wi2v($wi)
-## ($wv,$n) = $model->wi2v($wi)
 ##  + gets raw word-vector for known word with index $wi
 ##  + returns null-vector if $wi is out-of-bounds
 ##  + in list-context, second component $n is 1 iff $w is known, otherwise 0
@@ -270,15 +309,14 @@ sub wi2v {
   $model->trace("wi2v($wi)");
   if (defined($wi) && $wi >= 0 && $wi < $model->{wenum}{size}) {
     my $wv = $model->{rwmat}->slice(",($wi)");
-    return wantarray ? ($wv,1) : $wv;
+    return $wv;
   }
   $model->vlog($model->{logOOV}, "wi2v(): returning null vector for unknown word index #$wi");
-  return wantarray ? ($model->nullv(),0) : $model->nullv;
+  return $model->nullv;
 }
 
 ##--------------------------------------------------------------
-## $wv      = $model->w2v($w)
-## ($wv,$n) = $model->w2v($w)
+## $wv = $model->w2v($w)
 ##  + gets raw word-vector for word $w
 ##  + returns null-vector if $w is unknown
 ##  + in list-context, second component $n is 1 iff $w is known, otherwise 0
@@ -290,43 +328,51 @@ sub w2v {
     return $model->wi2v($wi);
   }
   $model->vlog($model->{logOOV}, "w2v(): returning null vector for unknown word '$w'");
-  return wantarray ? ($model->nullv,0) : $model->nullv;
+  return $model->nullv;
 }
 
 ##--------------------------------------------------------------
-## $wv      = $model->re2v($re)
-## ($wv,$n) = $model->re2v($re)
+## $wv = $model->re2v($re)
 ##  + gets average word-vector for all known words matching regex $re
 ##  + returns null-vector if $re doesn't match anything
-##  + in list-context, second component $n is number of matches for $re
+##  + match contributions are weighted by $model->{wfreq} if available and $model->{ngweight} is true
 sub re2v {
   my ($model,$re) = @_;
   utf8::decode($re) if (!ref($re) && !utf8::is_utf8($re));
   $model->trace("re2v($re)");
 
-  my $wv  = $model->nullv;
   my $wis = $model->{wenum}->re2i($re);
-  if (@$wis) {
-    $wv += $model->{rwmat}->slice(",($_)") foreach (@$wis);
-    $wv /= scalar(@$wis);
-  } else {
-    $model->vlog($model->{logOOV}, "re2v(): returning null vector for unknown regex $re");
+  if ($wis && @$wis) {
+    my $wip = pdl(indx,$wis);
+    if (defined($model->{wfreq}) && $model->{ngweight}) {
+      ##-- weight by word frequencies
+      my $wmat = $model->{rwmat}->dice_axis(1,$wip)->xchg(0,1);
+      my $wf   = $model->{wfreq}->index($wip);
+      my $wv   = ($wmat * $wf)->sumover;
+      $wv     /= $wf->sumover;
+      return $wv;
+    } else {
+      ##-- uniform weighting
+      my $wv = $model->{rwmat}->dice_axis(1,$wip)->xchg(0,1)->sumover / $wip->nelem;
+      return $wv;
+    }
   }
-  return wantarray ? ($wv,scalar(@$wis)) : $wv;
+  $model->vlog($model->{logOOV}, "re2v(): returning null vector for unknown regex $re");
+  return $model->nullv;
 }
 
 ##--------------------------------------------------------------
-## $wv      = $model->ngrams2v($w,%opts)
-## ($wv,$n) = $model->ngrams2v($w,%opts)
+## $wv = $model->ngrams2v($w,%opts)
 ##  + gets average word-vector for all n-grams between lengths $model->{minn} and $model->{maxn}
+##  + implicitly calls re2v() on generated n-gram regex
 ##  + not really helpful (resulting vectors are too generic / only garbage neighbors)
-##  + in list-context, second component $n is number of matches for generated $re
+##    - frequency-weighting helps sometimes (nn("Ochsenhaus")="Haus"), but is an ugly post-hoc workaround (nn("Ochsenöl") = "Sachsen")
 sub ngrams2v {
   my ($model,$w) = @_;
   utf8::decode($w) if (!utf8::is_utf8($w));
   $model->trace("ngrams2v($w)");
 
-  my ($minn,$maxn) = map {($_//0)} @$model{qw(minn maxn)};
+  my ($minn,$maxn,$nganchor) = map {($_//0)} @$model{qw(minn maxn nganchor)};
   if ($minn > 0 && $maxn >= $minn) {
     my @ngrams = qw();
     my ($i,$j,$len);
@@ -334,13 +380,13 @@ sub ngrams2v {
     for ($i=0; $i < length($ww); ++$i) {
       for ($j=$i+1; $j <= length($ww); ++$j) {
 	$len = $j-$i;
-	if ($len >= $minn && $len <= $maxn) {
+	if ($len >= $minn && $len <= $maxn && (!$nganchor || $i==0 || $j==length($ww))) {
 	  push(@ngrams, quotemeta(substr($ww,$i,$len)));
 	}
       }
     }
     my $re_str = join('|', map {s/^\\\^/^/; s/\\\$$/\$/; "(?:$_)"} grep {$_ ne "\\^" && $_ ne "\\\$" } @ngrams);
-    $model->vlog($model->{logOOV}, "ngrams2v(): unknown word '$w' - creating n-gram regex (minn=$minn; maxn=$maxn): regex=/$re_str/");
+    $model->vlog($model->{logOOV}, "ngrams2v(): unknown word '$w' - creating n-gram regex (minn=$minn; maxn=$maxn; nganchor=$nganchor; ngweight=$model->{ngweight}): regex=/$re_str/");
     return $model->re2v($re_str);
   }
   else {
