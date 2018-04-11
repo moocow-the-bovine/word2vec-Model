@@ -148,8 +148,11 @@ sub cluster {
 
 ##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ## $sclr = pdl_sclr($pdl_or_scalar)
+## $sclr = pdl_sclr($pdl_or_scalar,$fmt)
+##  + return values should always be numeric
 sub pdl_sclr {
-  return UNIVERSAL::isa($_[0],'PDL') ? $_[0]->sclr : $_[0];
+  my $sclr = UNIVERSAL::isa($_[0],'PDL') ? $_[0]->sclr : $_[0];
+  return $_[1] ? (sprintf($_[1],$sclr)+0) : $sclr;
 }
 
 ##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -157,11 +160,10 @@ sub pdl_sclr {
 ## \%stats = pdl_stats($pdl,$fmt)
 ## \%stats = pdl_stats($pdl,$fmt)
 sub pdl_stats {
-  my $p = shift;
+  my ($p,$fmt) = @_;
   my %stats;
   @stats{qw(avg prms med min max adev sd)} = map {pdl_sclr($_)} $p->stats;
-  if (@_) {
-    my $fmt = shift;
+  if ($fmt) {
     $_ = sprintf($fmt,$_) foreach (values %stats);
   }
   delete @stats{qw(prms adev)}; ##-- ignore these
@@ -251,11 +253,12 @@ sub summary {
   ##-- common vars
   my $nw    = $kc->{model}{nw};
   my $nunkw = which($kc->{clusterids}==-1)->nelem;
+  my $fmt   = '%.4g';
 
   return (
 	  "model basename: $kc->{model}{base}",
 	  "number of target words: $nw",
-	  "number of unknown targets (ignored): $nunkw (".sprintf("%.1f %%", 100*$nunkw/$nw).")",
+	  "number of unknown targets (ignored): $nunkw (".sprintf("%.1f %%", ($nw ? (100*$nunkw/$nw) : 'NaN')).")",
 	  "number of passes: $kc->{npass}",
 	  "number of times solution found: $kc->{nfound}",
 	  "number of clusters: $kc->{nc}",
@@ -263,7 +266,7 @@ sub summary {
 	  "cluster centroid method: $kc->{ctr}",
 	  "cluster sizes (min/max/med/avg/sd): ".pdl_summary($kc->{csizes}),
 	  "cluster dists (min/max/med/avg/sd): ".pdl_summary($kc->{wcdist}),
-	  "total dist = ".sprintf("%.3g", pdl_sclr($kc->{error}))."\n",
+	  "total dist = ".pdl_sclr($kc->{error},"%.4g")."\n",
 	 );
 }
 
@@ -308,14 +311,14 @@ sub saveTextCluster {
   my $ctag  = $opts{ctag}  || "c$ci";
 
   my $cinfo = $kc->cinfo($ci);
-  my $stats = pdl_stats($cinfo->{wdist},"%.3g");
+  my $stats = pdl_stats($cinfo->{wdist},"%.4g");
   print $fh
     ("# $label (".join('; ', ("size=".$cinfo->{wis}->nelem), map {"d_$_=$stats->{$_}"} qw(min max med avg sd)).")\n",
      (map {
        join("\t",
 	    $kc->{kmask}->at($_),
 	    $ctag,
-	    sprintf("%.4f",$kc->{wcdist}->at($_)),
+	    pdl_sclr($kc->{wcdist}->at($_),'%.4f'),
 	    $kc->{model}{wenum}->i2s($_)
 	   )."\n"
 	 } $cinfo->{wis}->list),
@@ -338,23 +341,26 @@ sub TO_JSON {
 
   my $cls = ref($kc);
   $cls =~ s/^word2vec:://;
+  my $ffmt = '%g'; ##-- float format
   my $hdr = {
 	     'class'=>$cls,
 	     'version'=>$VERSION,
 	     'libversion'=>"PDL::Cluster v$PDL::Cluster::VERSION",
+	     'model' => $kc->{model}{base},
 	     (map {($_=>$kc->{$_})} qw(dist ctr)),
-	     (map {($_=>pdl_sclr($kc->{$_})+0)} qw(npass nc)),
+	     (map {($_=>pdl_sclr($kc->{$_}))} qw(npass nc)),
 	     'stats' => {
-			 'error' => sprintf("%.4g",pdl_sclr($kc->{error}))+0,
-			 'nfound' => pdl_sclr($kc->{nfound}),
-			 'csizes' => json_stats($kc->{csizes},"%.4g"),
-			 'cdists' => json_stats($kc->{wcdist},"%.4g"),
-			},
+			 'error' => pdl_sclr($kc->{error},$ffmt),
+			 'nfound' => pdl_sclr($kc->{nfound},'%d'),
+			 'csizes' => json_stats($kc->{csizes},$ffmt),
+			 'cdists' => json_stats($kc->{wcdist},$ffmt),
+			}
 	    };
+
   my @clus = qw();
-  push(@clus, $kc->saveJsonCluster(-1,label=>"UNKNOWN",ctag=>'u')) if (any($kc->{clusterids}==-1));
+  push(@clus, $kc->saveJsonCluster(-1,label=>"UNKNOWN",ctag=>'u',ffmt=>$ffmt)) if (any($kc->{clusterids}==-1));
   for (my $ci = 0; $ci < $kc->{nc}; ++$ci) {
-    push(@clus, $kc->saveJsonCluster($ci));
+    push(@clus, $kc->saveJsonCluster($ci,ffmt=>$ffmt));
   }
 
   return { head=>$hdr, clusters=>\@clus };
@@ -365,14 +371,17 @@ sub saveJsonCluster {
   my ($kc,$ci,%opts) = @_;
   my $label = $opts{label} || "CLUSTER_$ci";
   my $ctag  = $opts{ctag}  || "c$ci";
+  my $ffmt  = $opts{ffmt}  || "%g";
 
   my $cinfo  = $kc->cinfo($ci);
-  my @citems = map { {dist=>$kc->{wcdist}->at($_), known=>$kc->{kmask}->at($_), label=>$kc->{model}{wenum}->i2s($_)} } $cinfo->{wis}->list;
+  my @citems = map {
+    {dist=>pdl_sclr($kc->{wcdist}->at($_),$ffmt), known=>$kc->{kmask}->at($_), text=>$kc->{model}{wenum}->i2s($_)}
+  } $cinfo->{wis}->list;
   my $jc = {
 	    label  =>$label,
 	    tag    =>$ctag,
 	    size   =>$cinfo->{wis}->nelem,
-	    dstats =>json_stats($cinfo->{wdist},"%.4f"),
+	    dstats =>json_stats($cinfo->{wdist},$ffmt),
 	    items  =>\@citems,
 	   };
   return $jc;
