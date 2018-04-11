@@ -2,14 +2,6 @@
 use ExtUtils::MakeMaker;
 use 5.010; ##-- in case old EU::MM doesn't grok MIN_PERL_VERSION
 
-##----------------------------------------------------------------------
-## PDL-dependencies (for CONFIGURE_REQUIRES)
-my %pdl_deps = (
-		'PDL' => '2.007', ##-- dist:2.007, local:2.014
-		'PDL::VectorValued' => '1.0.5',
-		'DiaColloDB' => '0.12.010',
-	       );
-
 ##-- workaround for irritating "/some/symlinked/file is encountered a second time at File/Find.pm line 79." errors
 ##   under ExtUtils::MakeMaker 7.1002 (see also RT bug #99018)
 #*ExtUtils::MakeMaker::_check_files = sub {};
@@ -31,6 +23,7 @@ WriteMakefile
 		 'PDL' => '2.007', ##-- dist:2.007, local:2.014
 		 'PDL::VectorValued' => '1.0.5',
 		 'PDL::CCS' => '1.23.4',
+		 'PDL::Cluster' => '1.54.001',
 		 'DiaColloDB' => '0.12.010',
 		 'Test::More' => 0,
 		},
