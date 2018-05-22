@@ -549,7 +549,7 @@ sub knn {
   my $sim  = $model->{rwmat}->vv_vcos($qv);
   if (defined($model->{wfreq}) && $model->{xweight}) {
     $sim  *= $model->{wfreq};
-    $sim  /= $sim->maximum->abs;
+    $sim  /= $sim->abs->maximum;
   }
   my $maxi = zeroes(indx,$k);
   $sim->maximum_n_ind($maxi);
