@@ -10,7 +10,7 @@ use open qw(:std :utf8);
 use strict;
 
 our @ISA = qw(DiaColloDB::Persistent);
-our $VERSION = '0.0.2';
+our $VERSION = '0.0.3';
 
 BEGIN {
   no warnings 'once';
@@ -36,6 +36,7 @@ BEGIN {
 ##     maxn  => $maxn,    ##-- maximum n-gram length for OOV vector estimation (default=0:disable)
 ##     nganchor => $bool, ##-- if true, only use anchored (BOW,EOW) n-grams (default=0)
 ##     ngweight => $bool, ##-- if true, regex vectors are weighted by {wfreq} if available (default=1)
+##     xweight => $bool,  ##-- if true, query vectors are weighted by {wfreq} if available (default=0)
 ##     ##
 ##     ##-- logging
 ##     logOOV => $level,  ##-- log-level for OOV words (default='warn')
@@ -56,6 +57,7 @@ sub new {
 		     maxn => 0,
 		     nganchor => 0,
 		     ngweight => 1,
+		     xweight => 0,
 		     logOOV => 'warn',
 		     wenum => DiaColloDB::EnumFile::MMap->new(flags=>'r'),
 		     nr  => undef,
@@ -282,7 +284,7 @@ sub project {
     print $pdlfh ($buf x $start) if ($start > 0);
   }
 
-  ##-- generate vectors
+  ##-- generate pdl-vectors
   my $i2s = ($start==0 ? $words : []);      ##-- $w=$i2s->[$wi]
   $i2s->[$start-1] = undef if ($start > 0); ##-- honor start offset
   my ($w,$wv);
@@ -291,7 +293,7 @@ sub project {
     $wv = $imodel->any2v($w);
     print $pdlfh pack($packas,$wv->list); ##-- possible type conversion via perl pack
   }
-  ##-- finalize pdl-file
+  ##-- finalize pdl-vectors
   CORE::close($pdlfh)
       or $model->logconfess("project(): close failed for raw PDL-file '$pdlbase': $!");
 
@@ -320,7 +322,7 @@ sub project {
   $wenum->save()
     or $model->logconfess("project(): failed to save enum to '$ebase.*': $!");
 
-  ##-- project frequencies (NOT IMPLEMENTED)
+  ##-- TODO: project frequencies (NOT YET IMPLEMENTED)
 
   ##-- now open the model
   #$model->info("project(): opening newly compiled model");
@@ -376,7 +378,7 @@ sub close {
   my $model = shift;
   return undef if (!$model->opened);
   $model->debug("close()");
-  delete @$model{qw(rwmat nr nw)};
+  delete @$model{qw(rwmat nr nw wfreq)};
   return $model->{wenum}->close() if ($model->{wenum} && $model->{wenum}->opened);
   return 1;
 }
@@ -402,7 +404,7 @@ sub wi2v {
   $model->trace("wi2v($wi)");
   if (defined($wi) && $wi >= 0 && $wi < $model->{wenum}{size}) {
     my $wv = $model->{rwmat}->slice(",($wi)");
-    return $wv;
+    return (defined($model->{wfreq}) && $model->{xweight} ? ($wv*$model->{wfreq}->index($wi)) : $wv);
   }
   $model->vlog($model->{logOOV}, "wi2v(): returning null vector for unknown word index #$wi");
   return $model->nullv;
@@ -545,6 +547,10 @@ sub knn {
   $k ||= 10;
   $qv  = $qv->convert($model->{rwmat}->type) if ($qv->type > $model->{rwmat}->type);
   my $sim  = $model->{rwmat}->vv_vcos($qv);
+  if (defined($model->{wfreq}) && $model->{xweight}) {
+    $sim  *= $model->{wfreq};
+    $sim  /= $sim->maximum->abs;
+  }
   my $maxi = zeroes(indx,$k);
   $sim->maximum_n_ind($maxi);
 
