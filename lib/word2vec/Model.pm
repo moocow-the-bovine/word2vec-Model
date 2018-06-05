@@ -10,7 +10,7 @@ use open qw(:std :utf8);
 use strict;
 
 our @ISA = qw(DiaColloDB::Persistent);
-our $VERSION = '0.0.3';
+our $VERSION = '0.0.4';
 
 BEGIN {
   no warnings 'once';
@@ -42,7 +42,7 @@ BEGIN {
 ##     logOOV => $level,  ##-- log-level for OOV words (default='warn')
 ##     ##
 ##     ##-- guts
-##     wenum => $wenum,   ##-- word (lemma) enum
+##     wenum => $wenum,   ##-- word (lemma) enum ("$base.enum.*")
 ##     nr    => $nr,      ##-- number of "topics" / "latent dimensions" of model / model "rank"
 ##     nw    => $nw,      ##-- number of enum-ified words
 ##     rwmat => $rwmat,   ##-- "$base.pdl"     : topic-word matrix ($nr,$nw): [$ri,$wi] => $rval_at_w
@@ -544,6 +544,7 @@ sub expr2v {
 ##  + get k-nearest-neighbor IDs for vector $qv
 sub knn {
   my ($model,$qv,$k) = @_;
+  $model->trace("knn(<...>,$k)");
   $k ||= 10;
   $qv  = $qv->convert($model->{rwmat}->type) if ($qv->type > $model->{rwmat}->type);
   my $sim  = $model->{rwmat}->vv_vcos($qv);

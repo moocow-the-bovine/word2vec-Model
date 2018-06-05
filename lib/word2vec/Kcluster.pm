@@ -11,7 +11,7 @@ use open qw(:std :utf8);
 use strict;
 
 our @ISA = qw(DiaColloDB::Persistent);
-our $VERSION = '0.0.2';
+our $VERSION = '0.0.4';
 
 BEGIN {
   push(@{$DiaColloDB::Logger::defaultLogOpts{logwhich}}, __PACKAGE__)
