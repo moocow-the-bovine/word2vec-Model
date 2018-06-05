@@ -31,10 +31,10 @@ GetOptions(
 	   'log-level|level|ll=s' => sub { $log{level} = uc($_[1]); },
 	   'log-option|logopt|lo=s' => \%log,
 	  );
-if ($help || @ARGV < 2) {
+if ($help || @ARGV < 3) {
   print STDERR <<EOF;
 
-Usage: $prog \[OPTIONS] MODEL WORD...
+Usage: $prog \[OPTIONS] MODEL WORD WORD...
 
 Options:
   -h,  -help                # this help message
