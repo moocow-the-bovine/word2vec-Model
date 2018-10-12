@@ -65,6 +65,9 @@ Options:
   -h,  -help                # this help message
   -v,  -[no]verbose         # do/don't include verbose output columns (distances; default=do)
   -c,  -[no]compile         # do/don't compile text-model FTMODEL (default=don't)
+  -o,  -output OUTFILE      # set output file (default=STDOUT)
+  -T,  -text                # select text output mode
+  -J,  -json                # select json output mode
        -minn MINN           # minimum n-gram length for OOV words (default=$model{minn})
        -maxn MAXN           # minimum n-gram length for OOV words (default=$model{maxn})
        -[no]anchor          # do/don't use only anchored (BOW,EOW) n-gram regexes (default=$model{nganchor})
